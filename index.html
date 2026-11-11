@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flag Elimination Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling from flying flags */
+        }
+        
+        .bowl-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            height: 50vh;
+            min-height: 300px;
+            margin: 0 auto;
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: none;
+            border-radius: 0 0 100px 100px;
+            background: linear-gradient(180deg, rgba(30, 41, 59, 0.2) 0%, rgba(51, 65, 85, 0.6) 100%);
+            box-shadow: inset 0 -20px 50px rgba(0,0,0,0.5), 0 20px 50px rgba(0,0,0,0.3);
+            overflow: hidden;
+            clip-path: inset(0 -100px -100px -100px); /* Allow flags to fly out the top */
+        }
+
+        .flag {
+            position: absolute;
+            width: 32px;
+            height: 24px;
+            background-size: cover;
+            background-position: center;
+            border-radius: 2px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            will-change: transform;
+            /* Using translate3d for hardware acceleration */
+        }
+
+        .flag.eliminated {
+            transition: opacity 1s ease-in, transform 1s ease-in;
+            z-index: 50;
+        }
+
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+        }
+
+        /* Confetti animation for the winner */
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); box-shadow: 0 0 20px rgba(255,215,0,0.8); }
+            100% { transform: scale(1); }
+        }
+        .winner-pop {
+            animation: pop 1s ease-in-out infinite;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <header class="p-4 bg-slate-900 shadow-md z-10 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 text-center">
+            Global Flag Royale
+        </h1>
+        <div class="flex gap-2">
+            <button id="startBtn" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-full font-semibold shadow-lg transition transform hover:scale-105 active:scale-95 text-white">
+                Start Game
+            </button>
+            <button id="resetBtn" class="px-6 py-2 bg-rose-600 hover:bg-rose-500 rounded-full font-semibold shadow-lg transition transform hover:scale-105 active:scale-95 text-white">
+                Reset
+            </button>
+            <button id="scoreBtn" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-full font-semibold shadow-lg transition transform hover:scale-105 active:scale-95 text-white">
+                Score
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow flex flex-col items-center justify-start p-4 relative z-0">
+        
+        <div id="statusText" class="text-xl mb-4 h-8 font-medium text-slate-300">
+            Click Start to begin the shuffle!
+        </div>
+
+        <div id="bowl" class="bowl-container">
+            <!-- Flags will be injected here -->
+        </div>
+
+        <!-- Top 10 List -->
+        <div id="top10Container" class="mt-6 w-full max-w-3xl hidden flex-col items-center">
+            <h2 class="text-xl font-bold mb-2 text-yellow-400">Final 10 Surviving Countries</h2>
+            <div id="top10List" class="flex flex-wrap justify-center gap-2">
+                <!-- Surviving flags listed here -->
+            </div>
+        </div>
+
+    </main>
+
+    <div id="scoreModal" class="fixed inset-0 modal-overlay hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl">
+            <h2 class="text-2xl font-bold mb-4 border-b border-slate-600 pb-2">Session Winners</h2>
+            <ul id="winnersList" class="max-h-64 overflow-y-auto space-y-2 mb-4 text-slate-300">
+                <li class="italic text-slate-500">No winners yet. Play a game!</li>
+            </ul>
+            <button id="closeScoreBtn" class="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold transition">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <div id="winnerOverlay" class="fixed inset-0 pointer-events-none hidden z-40 flex flex-col items-center justify-center">
+        <h1 class="text-6xl font-black text-yellow-400 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)] mb-4 animate-bounce">
+            WINNER!
+        </h1>
+        <div id="winnerText" class="text-4xl font-bold text-white drop-shadow-lg bg-black/50 px-8 py-4 rounded-full">
+            Country Name
+        </div>
+    </div>
+
+    <script>
+        // Compact country data (Code|Name) to save space but provide a good list.
+        const countryDataStr = "ar|Argentina,au|Australia,at|Austria,be|Belgium,br|Brazil,ca|Canada,cl|Chile,cn|China,co|Colombia,dk|Denmark,eg|Egypt,fi|Finland,fr|France,de|Germany,gr|Greece,in|India,id|Indonesia,ie|Ireland,il|Israel,it|Italy,jp|Japan,kr|South Korea,mx|Mexico,nl|Netherlands,nz|New Zealand,ng|Nigeria,no|Norway,pe|Peru,ph|Philippines,pl|Poland,pt|Portugal,ru|Russia,sa|Saudi Arabia,za|South Africa,es|Spain,se|Sweden,ch|Switzerland,tr|Turkey,ua|Ukraine,gb|United Kingdom,us|United States,ve|Venezuela,vn|Vietnam,th|Thailand,my|Malaysia,sg|Singapore,pk|Pakistan,bd|Bangladesh,lk|Sri Lanka,ke|Kenya,gh|Ghana,ma|Morocco,dz|Algeria,cu|Cuba,jm|Jamaica,cr|Costa Rica,pa|Panama,uy|Uruguay,py|Paraguay,bo|Bolivia,ec|Ecuador,cz|Czechia,hu|Hungary,ro|Romania,bg|Bulgaria,rs|Serbia,hr|Croatia,sk|Slovakia,lt|Lithuania,lv|Latvia,ee|Estonia,is|Iceland";
+        
+        const allCountries = countryDataStr.split(',').map(item => {
+            const [code, name] = item.split('|');
+            return { code, name };
+        });
+
+        const flags = [];
+        let activeFlags = [];
+        let winnersHistory = [];
+        
+        let gameState = 'idle'; // idle, shuffling, eliminating, finished
+        let gameLoopId;
+        let eliminationIntervalId;
+        let shuffleTimeoutId;
+        
+        const bowlEl = document.getElementById('bowl');
+        const startBtn = document.getElementById('startBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const scoreBtn = document.getElementById('scoreBtn');
+        const statusText = document.getElementById('statusText');
+        const top10Container = document.getElementById('top10Container');
+        const top10List = document.getElementById('top10List');
+        const scoreModal = document.getElementById('scoreModal');
+        const closeScoreBtn = document.getElementById('closeScoreBtn');
+        const winnersList = document.getElementById('winnersList');
+        const winnerOverlay = document.getElementById('winnerOverlay');
+        const winnerText = document.getElementById('winnerText');
+
+        // Physics constants
+        const FLAG_WIDTH = 32;
+        const FLAG_HEIGHT = 24;
+        let BOWL_WIDTH = bowlEl.clientWidth;
+        let BOWL_HEIGHT = bowlEl.clientHeight;
+
+        function createFlags() {
+            bowlEl.innerHTML = '';
+            flags.length = 0;
+            activeFlags.length = 0;
+            top10List.innerHTML = '';
+            top10Container.classList.add('hidden');
+            winnerOverlay.classList.add('hidden');
+
+            BOWL_WIDTH = bowlEl.clientWidth;
+            BOWL_HEIGHT = bowlEl.clientHeight;
+
+            allCountries.forEach(country => {
+                const el = document.createElement('div');
+                el.className = 'flag';
+                el.style.backgroundImage = `url(https://flagcdn.com/w40/${country.code}.png)`;
+                el.title = country.name;
+                
+                // Random starting position inside the bowl
+                const x = Math.random() * (BOWL_WIDTH - FLAG_WIDTH);
+                const y = Math.random() * (BOWL_HEIGHT - FLAG_HEIGHT);
+                
+                // Random velocities
+                const vx = (Math.random() - 0.5) * 2;
+                const vy = (Math.random() - 0.5) * 2;
+
+                bowlEl.appendChild(el);
+
+                const flagObj = {
+                    ...country,
+                    el, x, y, vx, vy,
+                    active: true
+                };
+                flags.push(flagObj);
+                activeFlags.push(flagObj);
+            });
+        }
+
+        function updatePhysics() {
+            if (gameState === 'idle') {
+                gameLoopId = requestAnimationFrame(updatePhysics);
+                return;
+            }
+
+            // Update dimensions in case of window resize
+            BOWL_WIDTH = bowlEl.clientWidth;
+            BOWL_HEIGHT = bowlEl.clientHeight;
+
+            let speedMultiplier = gameState === 'shuffling' ? 5 : 1.5;
+
+            activeFlags.forEach(f => {
+                if (!f.active) return;
+
+                f.x += f.vx * speedMultiplier;
+                f.y += f.vy * speedMultiplier;
+
+                // Simple Box Collision (Bouncing)
+                if (f.x <= 0) { f.x = 0; f.vx *= -1; }
+                if (f.x >= BOWL_WIDTH - FLAG_WIDTH) { f.x = BOWL_WIDTH - FLAG_WIDTH; f.vx *= -1; }
+                
+                if (f.y <= 0) { f.y = 0; f.vy *= -1; }
+                if (f.y >= BOWL_HEIGHT - FLAG_HEIGHT) { f.y = BOWL_HEIGHT - FLAG_HEIGHT; f.vy *= -1; }
+
+                f.el.style.transform = `translate3d(${f.x}px, ${f.y}px, 0)`;
+            });
+
+            gameLoopId = requestAnimationFrame(updatePhysics);
+        }
+
+        function eliminateRandomFlag() {
+            if (activeFlags.length <= 1) {
+                endGame();
+                return;
+            }
+
+            const randomIndex = Math.floor(Math.random() * activeFlags.length);
+            const flagToEliminate = activeFlags[randomIndex];
+            
+            // Remove from active array
+            activeFlags.splice(randomIndex, 1);
+            flagToEliminate.active = false;
+
+            // Elimination Animation
+            flagToEliminate.el.classList.add('eliminated');
+            // Fly upwards out of the bowl
+            flagToEliminate.el.style.transform = `translate3d(${flagToEliminate.x}px, -150px, 0) rotate(${Math.random()*360}deg) scale(1.5)`;
+            flagToEliminate.el.style.opacity = '0';
+
+            // Clean up DOM after animation
+            setTimeout(() => {
+                if (flagToEliminate.el.parentNode) {
+                    flagToEliminate.el.parentNode.removeChild(flagToEliminate.el);
+                }
+            }, 1000);
+
+            // Update UI 
+            statusText.textContent = `Eliminated: ${flagToEliminate.name} (${activeFlags.length} left)`;
+
+            if (activeFlags.length <= 10) {
+                updateTop10List();
+            }
+            if (activeFlags.length === 1) {
+                endGame();
+            }
+        }
+
+        function updateTop10List() {
+            if (top10Container.classList.contains('hidden')) {
+                top10Container.classList.remove('hidden');
+            }
+            top10List.innerHTML = '';
+            activeFlags.forEach(f => {
+                const badge = document.createElement('div');
+                badge.className = 'flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-600 shadow-sm';
+                badge.innerHTML = `<img src="https://flagcdn.com/w20/${f.code}.png" class="w-5 h-4 object-cover rounded-sm"> <span class="text-sm">${f.name}</span>`;
+                top10List.appendChild(badge);
+            });
+        }
+
+        function startGame() {
+            if (gameState !== 'idle') resetGame();
+            
+            gameState = 'shuffling';
+            startBtn.disabled = true;
+            statusText.textContent = "Shuffling... Get Ready!";
+            
+            // Start shuffling phase for 10 seconds
+            shuffleTimeoutId = setTimeout(() => {
+                gameState = 'eliminating';
+                statusText.textContent = "Elimination Phase Started!";
+                
+                // Eliminate every 5 seconds
+                eliminationIntervalId = setInterval(eliminateRandomFlag, 5000);
+            }, 10000);
+        }
+
+        function endGame() {
+            clearInterval(eliminationIntervalId);
+            gameState = 'finished';
+            startBtn.disabled = false;
+            
+            const winner = activeFlags[0];
+            if(winner) {
+                winner.el.classList.add('winner-pop');
+                // Move winner to center visually
+                winner.x = BOWL_WIDTH / 2 - FLAG_WIDTH / 2;
+                winner.y = BOWL_HEIGHT / 2 - FLAG_HEIGHT / 2;
+                winner.vx = 0;
+                winner.vy = 0;
+                winner.el.style.transform = `translate3d(${winner.x}px, ${winner.y}px, 0) scale(3)`;
+                winner.el.style.zIndex = '100';
+
+                statusText.textContent = `Game Over! Winner: ${winner.name}`;
+                winnerText.innerHTML = `<img src="https://flagcdn.com/w80/${winner.code}.png" class="inline-block mr-3 rounded-md shadow-md align-middle"> ${winner.name}`;
+                winnerOverlay.classList.remove('hidden');
+
+                // Save to history
+                winnersHistory.push(winner.name);
+                updateScoreBoard();
+            }
+        }
+
+        function resetGame() {
+            clearTimeout(shuffleTimeoutId);
+            clearInterval(eliminationIntervalId);
+            gameState = 'idle';
+            startBtn.disabled = false;
+            statusText.textContent = "Click Start to begin the shuffle!";
+            createFlags();
+        }
+
+        function updateScoreBoard() {
+            winnersList.innerHTML = '';
+            if (winnersHistory.length === 0) {
+                winnersList.innerHTML = '<li class="italic text-slate-500">No winners yet. Play a game!</li>';
+                return;
+            }
+            winnersHistory.forEach((name, index) => {
+                const li = document.createElement('li');
+                li.className = 'bg-slate-700 p-2 rounded-md border border-slate-600 flex justify-between';
+                li.innerHTML = `<span>Game ${index + 1}</span> <span class="font-bold text-emerald-400">${name}</span>`;
+                winnersList.appendChild(li);
+            });
+        }
+
+        // Event Listeners
+        startBtn.addEventListener('click', startGame);
+        resetBtn.addEventListener('click', resetGame);
+        
+        scoreBtn.addEventListener('click', () => {
+            updateScoreBoard();
+            scoreModal.classList.remove('hidden');
+        });
+        
+        closeScoreBtn.addEventListener('click', () => {
+            scoreModal.classList.add('hidden');
+        });
+
+        // Handle window resize dynamically to keep bounds correct
+        window.addEventListener('resize', () => {
+            BOWL_WIDTH = bowlEl.clientWidth;
+            BOWL_HEIGHT = bowlEl.clientHeight;
+        });
+
+        // Init
+        createFlags();
+        gameLoopId = requestAnimationFrame(updatePhysics);
+
+    </script>
+</body>
+</html>
